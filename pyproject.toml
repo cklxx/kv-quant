@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kv-quant"
+version = "0.0.1"
+description = "KV / weight / activation quantization experiments — correctness, footprint, and compute performance."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "cklxx", email = "q1293822641@gmail.com" }]
+classifiers = [
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "numpy>=1.26",
+    "safetensors>=0.4",
+]
+
+[project.optional-dependencies]
+# Heavy ML stack — install on the box you actually run experiments on.
+torch = [
+    "torch>=2.4",
+    "transformers>=4.45",
+    "accelerate>=0.34",
+    "datasets>=2.20",
+    "sentencepiece",
+]
+# Quant kernel work. Triton is Linux+NVIDIA only; install where you have a GPU.
+kernels = [
+    "triton>=3.0; platform_system == 'Linux'",
+]
+dev = [
+    "pytest>=8",
+    "pytest-xdist>=3",
+    "ruff>=0.6",
+]
+
+[project.urls]
+Homepage = "https://github.com/cklxx/kv-quant"
+Issues = "https://github.com/cklxx/kv-quant/issues"
+
+[tool.setuptools.packages.find]
+include = ["kv_quant*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

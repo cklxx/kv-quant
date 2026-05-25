@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+env/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Experiment outputs
+results/
+runs/
+wandb/
+*.safetensors
+*.pt
+*.bin
+*.gguf
+*.npz
+*.npy
+
+# Local-only configs
+.env
+.envrc
+*.local.yaml

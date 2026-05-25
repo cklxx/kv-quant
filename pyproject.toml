@@ -29,6 +29,11 @@ torch = [
     "datasets>=2.20",
     "sentencepiece",
 ]
+# Apple Silicon path — primary local-dev backend on M-series.
+mlx = [
+    "mlx>=0.20",
+    "mlx-lm>=0.20",
+]
 # Quant kernel work. Triton is Linux+NVIDIA only; install where you have a GPU.
 kernels = [
     "triton>=3.0; platform_system == 'Linux'",

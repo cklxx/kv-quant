@@ -42,13 +42,21 @@ under `docs/experiments/` as long as it carries the three numbers.
 
 ```
 kv-quant/
+├── AGENTS.md         contract for any AI agent (Codex / Claude) editing here
 ├── kv_quant/         python package (modules added as experiments land)
+├── experiments/      standalone scripts — one per harness
 ├── docs/
+│   ├── ROADMAP.md    milestone view, ordered by dependency
 │   ├── scope.md      per-axis plan: questions, methods, metrics, references
-│   └── experiments/  dated per-experiment writeups (correctness + footprint + perf)
-├── tests/            pytest — smoke + correctness fixtures
+│   ├── plans/        dated execution plans (Codex briefs etc.)
+│   └── experiments/  dated experiment writeups + raw JSON under data/
+├── tests/            pytest — smoke + roundtrip + correctness fixtures
 └── pyproject.toml
 ```
+
+See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the milestone view and
+[`AGENTS.md`](AGENTS.md) for the agent contract (verification phases,
+SOLID principles, commit conventions).
 
 ## Quickstart
 

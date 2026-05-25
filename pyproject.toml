@@ -38,6 +38,11 @@ mlx = [
 kernels = [
     "triton>=3.0; platform_system == 'Linux'",
 ]
+storage = [
+    "zstandard>=0.23",
+    "lz4>=4.3",
+    "brotli>=1.1",
+]
 dev = [
     "pytest>=8",
     "pytest-xdist>=3",

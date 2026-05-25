@@ -9,9 +9,10 @@ measurement. Custom KV-quant schemes (e.g. KIVI-style per-token V quant,
 float-aware codecs on the bitstream, layer-delta) replace the per-step
 quantization path; the harness stays identical.
 
-Note: Qwen3.5 is hybrid (SSM + attention). We use `make_prompt_cache(model)`
-to get the correctly-typed per-layer cache list and let mlx-lm's
-`maybe_quantize_kv_cache` swap only the attention slots in-place.
+The default model is Qwen2.5-0.5B-Instruct-bf16 because mlx-lm routes it
+through the pure-attention `qwen2` module. The old Qwen3.5 bootstrap data is
+kept separately because Qwen3.5 is hybrid SSM + attention and is not a clean
+KV-only baseline.
 """
 
 from __future__ import annotations
@@ -27,8 +28,9 @@ from mlx_lm import load
 from mlx_lm.generate import generate_step
 from mlx_lm.models.cache import make_prompt_cache
 
-DEFAULT_MODEL = "mlx-community/Qwen3.5-0.8B-MLX-4bit"
+DEFAULT_MODEL = "mlx-community/Qwen2.5-0.5B-Instruct-bf16"
 DEFAULT_MAX_NEW = 64
+DEFAULT_OUT = "kv_mlx_baseline_qwen2_5_0_5b_instruct_bf16.json"
 
 PROMPTS = [
     "Write a Python function to compute the nth Fibonacci number.",
@@ -149,9 +151,7 @@ def main() -> None:
     ap.add_argument("--max-new-tokens", type=int, default=DEFAULT_MAX_NEW)
     ap.add_argument(
         "--out",
-        default=str(
-            Path(__file__).resolve().parents[1] / "docs/experiments/data/kv_mlx_baseline.json"
-        ),
+        default=str(Path(__file__).resolve().parents[1] / "docs/experiments/data" / DEFAULT_OUT),
     )
     ap.add_argument("--limit-prompts", type=int, default=0, help="0 = all")
     args = ap.parse_args()
@@ -213,7 +213,10 @@ def main() -> None:
 
     print("\n--- summary ---")
     base = results["configs"]["baseline_fp"]["agg"]
-    header = f"{'config':<14} {'agree':>7} {'perfect':>8} {'ttft':>8} {'decode':>11} {'cache':>10} {'vs FP':>8}"
+    header = (
+        f"{'config':<14} {'agree':>7} {'perfect':>8} {'ttft':>8} "
+        f"{'decode':>11} {'cache':>10} {'vs FP':>8}"
+    )
     print(header)
     for spec in CONFIGS:
         a = results["configs"][spec.name]["agg"]

@@ -25,9 +25,12 @@ the harness is wrong, every subsequent result is contaminated.
 
 **Status.** Bootstrap run on `mlx-community/Qwen3.5-0.8B-MLX-4bit`
 (2026-05-25) succeeded as a code-path smoke but revealed Qwen3.5 is
-SSM/attention hybrid — the cache state is dominated by SSM, so KV-only
-quantization moves total cache bytes by ~1%. Methodologically valid;
-empirically uninformative.
+SSM/attention hybrid - the cache state is dominated by SSM, so KV-only
+quantization moves total cache bytes by ~1%. The follow-up pure-attention
+run on `mlx-community/Qwen2.5-0.5B-Instruct-bf16` fixed the footprint signal
+(INT8 0.531x FP bytes, INT4 g64 0.281x FP bytes) but failed the correctness
+gate (INT8 g64 37.81% mean token agreement over 20 prompts x 64 tokens).
+M0 remains open; M1 sweeps should wait for a validated INT8 KV floor.
 
 **Acceptance.** A second harness run on a **pure-attention** small model
 (Qwen2.5-0.5B or Llama-3.2-1B in MLX format) shows the expected ~50%

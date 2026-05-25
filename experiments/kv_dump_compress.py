@@ -18,7 +18,14 @@ from mlx_lm.generate import generate_step
 from mlx_lm.models.cache import make_prompt_cache
 
 from experiments.kv_mlx_baseline import PROMPTS, argmax_sampler, compare_tokens
-from kv_quant.storage import BrotliCodec, Lz4Codec, RawCodec, ZstdCodec, dump_prompt_cache
+from kv_quant.storage import (
+    Blosc2LeafCodec,
+    BrotliCodec,
+    Lz4Codec,
+    RawCodec,
+    ZstdCodec,
+    dump_prompt_cache,
+)
 
 DEFAULT_MODEL = "mlx-community/Qwen3.5-9B-MLX-4bit"
 DEFAULT_OUT = "kv_dump_compress_qwen3_5_9b_3x64.json"
@@ -46,6 +53,9 @@ def codec_suite():
         ZstdCodec(3),
         ZstdCodec(9),
         BrotliCodec(5),
+        Blosc2LeafCodec("lz4", "bitshuffle"),
+        Blosc2LeafCodec("zstd", "shuffle"),
+        Blosc2LeafCodec("zstd", "bitshuffle"),
     ]
 
 

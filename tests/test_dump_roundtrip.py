@@ -1,7 +1,14 @@
 import mlx.core as mx
 import pytest
 
-from kv_quant.storage import BrotliCodec, Lz4Codec, RawCodec, ZstdCodec, dump_prompt_cache
+from kv_quant.storage import (
+    Blosc2LeafCodec,
+    BrotliCodec,
+    Lz4Codec,
+    RawCodec,
+    ZstdCodec,
+    dump_prompt_cache,
+)
 
 
 class DummyCache:
@@ -14,7 +21,15 @@ class DummyCache:
 
 @pytest.mark.parametrize(
     "codec",
-    [RawCodec(), ZstdCodec(1), Lz4Codec(), BrotliCodec(3)],
+    [
+        RawCodec(),
+        ZstdCodec(1),
+        Lz4Codec(),
+        BrotliCodec(3),
+        Blosc2LeafCodec("lz4", "bitshuffle"),
+        Blosc2LeafCodec("zstd", "shuffle"),
+        Blosc2LeafCodec("zstd", "bitshuffle"),
+    ],
     ids=lambda codec: codec.name,
 )
 def test_lossless_codec_roundtrip(codec):
@@ -27,3 +42,9 @@ def test_lossless_codec_roundtrip(codec):
 def test_dump_is_stable_for_same_cache():
     cache = [DummyCache()]
     assert dump_prompt_cache(cache) == dump_prompt_cache(cache)
+
+
+def test_blosc2_leaf_codec_roundtrips_concatenated_dumps():
+    blob = dump_prompt_cache([DummyCache()]) + dump_prompt_cache([DummyCache()])
+    codec = Blosc2LeafCodec("zstd", "shuffle")
+    assert codec.decode(codec.encode(blob)) == blob

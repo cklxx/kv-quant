@@ -1,124 +1,176 @@
 # Scope
 
-Per-axis plan: what we verify, what we measure, what we compare against. Each
-landed experiment under `docs/experiments/` cites a reference, reports the three
-numbers (correctness · footprint · perf), and links the code that produced them.
+Anything that drops the storage cost of LLM inference is in scope.
+Quantization changes how a value is represented. Compression squeezes the
+post-quant bitstream. Content reduction skips values entirely.
+Cross-request sharing avoids storing the same value twice. The end metric
+is identical regardless of which lever moved: bytes per token, bytes on
+disk, peak HBM — and whether throughput survived the trade.
 
-The bar: a method is not "supported" until all three numbers exist for at least
-one model at one shape on one SKU, and the result is reproducible from a single
-command.
+Methods compose. A landed experiment under `docs/experiments/` is usually
+two or three axes stacked, with correctness · footprint · perf reported
+together. A single-axis result is fine for an early ablation but is not the
+endpoint.
+
+The bar: a method is not "supported" until correctness · footprint · perf
+exist for at least one model at one shape on one SKU, and the result is
+reproducible from a single command.
 
 ---
 
-## 1. KV cache quantization
+## A. Format compression — how each value is represented
+
+### A1. KV cache quantization
 
 **Question.** How much HBM per token can we drop while preserving downstream
 quality and decode throughput?
 
-**Methods to verify.**
-- **INT8 KV** — per-channel scale, baseline.
-- **INT4 KV (KIVI-style)** — per-channel for K, per-token for V; mixed precision
-  for outlier channels. Ref: KIVI (Liu et al., 2024).
-- **FP8 KV (E4M3)** — straight cast, with and without per-tensor scale. Ref:
-  vLLM / TRT-LLM FP8 KV.
-- **KVQuant non-uniform** — codebook-based 2/3/4-bit. Ref: KVQuant
-  (Hooper et al., 2024).
+**Methods.** INT8 per-channel (baseline). INT4 KIVI-style (per-channel K,
+per-token V, outlier-aware). FP8 E4M3 with per-tensor scale. KVQuant
+non-uniform 2/3/4-bit codebooks.
 
-**Metrics.**
-- Correctness: output-token agreement (greedy) and logits MSE vs FP16, on a
-  fixed 256-prompt eval set; PPL on WikiText-2 for long-context runs.
-- Footprint: HBM bytes per (token · layer · head) and total bytes at fixed
-  context length.
-- Performance: decode tokens/s under continuous batching at fixed batch ×
-  seq-len; ratio against FP16 KV baseline on the same SKU.
+**Metrics.** Output-token agreement (greedy) and logits MSE vs FP16 on a
+fixed 256-prompt set. WikiText-2 PPL for long-context. HBM bytes per
+(token · layer · head). Decode tokens/s at fixed batch × seq-len ratio
+against FP16 KV on the same SKU.
 
----
+### A2. Weight quantization
 
-## 2. Weight quantization
+**Question.** Smallest model artifact that still serves at FP16 quality.
 
-**Question.** What's the smallest model artifact that still serves at FP16
-quality on standard evals?
+**Methods.** W8 symmetric per-channel (baseline). W4 AWQ. W4 GPTQ. W4A16
+group-128 with zero-point — the de-facto serving format.
 
-**Methods to verify.**
-- **W8 symmetric per-channel** — trivial baseline.
-- **W4 AWQ** — activation-aware scaling. Ref: AWQ (Lin et al., 2023).
-- **W4 GPTQ** — calibration via Hessian inverse. Ref: GPTQ
-  (Frantar et al., 2022).
-- **W4A16 with group-128 zero-point** — the de-facto serving format.
+**Metrics.** WikiText-2 PPL. MMLU subset (STEM + humanities) zero-shot.
+On-disk MB after packing. Load-time peak HBM. Prefill + decode tokens/s
+through a quantized GEMM kernel (Axis E).
 
-**Metrics.**
-- Correctness: PPL on WikiText-2; MMLU subset (STEM + humanities) zero-shot.
-- Footprint: on-disk MB after packing (safetensors); load-time peak HBM.
-- Performance: prefill and decode tokens/s through a quantized GEMM kernel
-  (see Axis 5).
+### A3. Activation quantization
 
----
+**Question.** Move activations to INT8 / FP8 without per-layer tuning.
 
-## 3. Activation quantization
+**Methods.** SmoothQuant W8A8. FP8 activations (E4M3) with per-tensor scale
+calibration.
 
-**Question.** Can we move activations to INT8 / FP8 without per-layer
-fine-tuning?
+**Metrics.** MMLU subset. Activation-cosine vs FP16 at every block boundary.
+End-to-end tokens/s with W8A8 GEMM.
 
-**Methods to verify.**
-- **SmoothQuant W8A8** — migrate outlier scale into weights. Ref: SmoothQuant
-  (Xiao et al., 2022).
-- **FP8 activations (E4M3)** — straight cast at chosen layers, with per-tensor
-  scale calibration.
+### A4. Lossless compression on the quant bitstream
 
-**Metrics.**
-- Correctness: MMLU subset; activation-cosine vs FP16 at every transformer
-  block boundary.
-- Footprint: not the primary motivation — report for completeness.
-- Performance: end-to-end tokens/s with W8A8 GEMM kernel.
+**Question.** After quantization, how much further can a generic or
+float-aware compressor shrink the bytes — and can decode hide under disk /
+network read latency on a tiered reload?
+
+**Methods.**
+- *Bit-packing density* — measure waste in naive INT4 packing (4-bit
+  values stored in 8-bit lanes) versus true nibble-packed streams.
+- *Generic byte compressors* — zstd, lz4, brotli on packed quant blocks.
+- *Float-aware compressors* — zfp, fpzip, BLOSC2 + Byteshuffle on FP16 KV
+  and on dequant residuals.
+- *Codebook + entropy coding* — k-means codebook plus entropy coding of
+  residuals.
+
+**Metrics.** Roundtrip bit-equal check (lossless modes). Compression ratio.
+Encode MB/s (matters for dump). Decode MB/s (matters for resume); the bar
+is decode time ≤ the tier read latency it overlaps with.
 
 ---
 
-## 4. KV persistence compression
+## B. Content reduction — drop / pick a subset of values
 
-**Question.** When KV cache spills off HBM (CPU RAM, NVMe, remote tier), how
-small can we get the persisted bytes per token while keeping reload-and-resume
-bit-equivalent (or measurably close) to in-HBM continuation?
+### B1. Eviction
 
-**Methods to verify.**
-- Layer-wise INT8 / INT4 dump with per-block scale; lossless codec on top
-  (zstd, lz4) to measure compressibility headroom.
-- Mixed: top-N layers FP16, rest INT4. Ref: H2O, Scissorhands eviction
-  intuition transplanted to compression.
-- Page-aligned tier formats that match ARLE's `kv_tier` page geometry.
+**Question.** How much live KV can we drop without breaking long-context
+generation?
 
-**Metrics.**
-- Correctness: post-reload generation matches the same prompt's in-HBM
-  continuation on the next K tokens (greedy-equal or token-disagreement-rate).
-- Footprint: bytes per (token · layer) on disk; total dump size for a fixed
-  session length.
-- Performance: dump and reload bandwidth (MB/s); end-to-end TTFT impact when
-  resuming from cold tier.
+**Methods.** H2O (heavy-hitter oracle). Scissorhands (persistence of
+importance). StreamingLLM (window + attention sinks).
+
+**Metrics.** Retained-token fraction. Output-token agreement on LongBench
+subset. Memory-resident bytes/token at steady state.
+
+### B2. Sparsification
+
+**Question.** Stored values that can be skipped entirely.
+
+**Methods.** Top-k retention per row. Threshold-based block drop. Structured
+sparsity (2:4) on KV.
+
+**Metrics.** Kept-fraction vs output-token agreement. Sparse-storage layout
+overhead (indices + values vs dense baseline).
+
+### B3. Mixed precision and token merging
+
+**Methods.** Top-N FP16 layers + rest INT4 — find the precision budget
+needed for parity. Token merging (ToMe-style) at attention to fuse
+redundant tokens.
+
+**Metrics.** Same as A1, with the precision budget itself as the headline
+result.
 
 ---
 
-## 5. Quantized compute kernels
+## C. Cross-request / cross-block sharing
 
-**Question.** Do the quantization formats above actually run fast, or are we
+### C1. Prefix deduplication measurement
+
+Prefix dedup is already a radix-cache feature in real engines. The question
+here is empirical: how much duplicate KV does production-shaped traffic
+carry, and what is the realistic effective bytes/token at the
+tier-storage layer after dedup?
+
+### C2. Identical-block detection beyond prefix
+
+Hash-based detection of repeating mid-sequence KV blocks across requests
+(boilerplate prompts, few-shot exemplars).
+
+### C3. Layer-delta and time-delta encoding
+
+**Layer delta.** KV at layer i+1 ≈ KV at layer i + small delta — store the
+delta with fewer bits.
+
+**Time delta.** KV at position t+1 ≈ KV at t, particularly for sink
+positions and slow-changing channels.
+
+Lossless if entropy-coded, lossy if quantized. Report both.
+
+---
+
+## D. Storage tier formats
+
+### D1. Page-aligned dumps
+
+Match ARLE's `kv_tier` page geometry so dumps don't need re-blocking on
+reload. Measure dump bandwidth and resume TTFT.
+
+### D2. Async checkpointing
+
+Overlap quant + compress + dump with ongoing decode. The question is
+whether the encode pipeline sustains the token-generation rate; if not,
+where the back-pressure surfaces.
+
+### D3. Cold-tier formats
+
+NVMe-optimized layout (sequential reads, no random IOPs on the hot path).
+Remote-tier formats (RDMA-friendly, batched). Trade-off: serving-time
+read latency vs offline encode cost.
+
+---
+
+## E. Quantized compute kernels
+
+**Question.** Do the quantization formats actually run fast, or are we
 trading memory for compute?
 
-**Methods to verify.**
-- **W4A16 GEMM** — Triton implementation, compared to a CUTLASS reference and
-  a published kernel (e.g. Marlin, machete) when available.
-- **W8A8 GEMM** — INT8 tensor-core path; compare against `torch._int_mm` and a
-  Triton reimplementation.
-- **FP8 GEMM** — `torch._scaled_mm` (E4M3) baseline; custom kernel only if
-  there is a clear gap.
-- **KV dequant fused with attention** — INT4 / INT8 KV unpack inside the
-  attention kernel, not as a separate pass.
+**Methods.** W4A16 GEMM in Triton vs a CUTLASS / Marlin reference. W8A8 INT8
+tensor-core path vs `torch._int_mm`. FP8 GEMM via `torch._scaled_mm` plus a
+custom kernel only if there is a clear gap. KV dequant fused inside the
+attention kernel rather than as a separate pass.
 
-**Metrics.**
-- Correctness: numerical match to a reference (FP16 GEMM with the dequantized
-  operands) within a stated tolerance.
-- Footprint: working memory (smem / register pressure) reported from the
-  kernel.
-- Performance: TFLOPs and tokens/s on a pinned SKU; comparison ratio against
-  the FP16 baseline. SKU is part of every result — never report a kernel
-  number without the SKU it ran on.
+**Metrics.** Numerical match to an FP16-on-dequant-operands reference
+within a stated tolerance. Working memory (smem / register pressure)
+reported from the kernel. TFLOPs and tokens/s on a pinned SKU; every
+kernel result includes the SKU it ran on.
 
 ---
 
@@ -128,4 +180,4 @@ trading memory for compute?
   are exhausted.
 - A new serving runtime. Algorithms and kernels that pass the bar feed back
   to `agent-infer` (ARLE).
-- A simulator. Tier modeling lives in `kvcache-sim`.
+- A KV-tier simulator. That is `kvcache-sim`.

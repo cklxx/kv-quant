@@ -1,7 +1,8 @@
 # Experiments
 
 One file per experiment. Filename: `YYYY-MM-DD-<axis>-<short-slug>.md`
-(axes: `kv`, `weight`, `act`, `persist`, `kernel`).
+(axes: `kv`, `weight`, `act`, `compress`, `evict`, `sparse`, `share`,
+`tier`, `kernel`; use the dominant axis if an experiment stacks several).
 
 Every entry has these sections, in this order:
 
